@@ -1,12 +1,9 @@
-package main
+package parcel
 
 import (
-	"database/sql"
 	"math/rand"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -19,10 +16,10 @@ var (
 )
 
 // getTestParcel возвращает тестовую посылку
-func getTestParcel() Parcel {
-	return Parcel{
+func testParcel() *Parcel {
+	return &Parcel{
 		Client:    1000,
-		Status:    ParcelStatusRegistered,
+		Status:    Registered,
 		Address:   "test",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
