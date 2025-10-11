@@ -8,31 +8,31 @@ import (
 
 const (
 	driverName     = "sqlite"     // Название драйвера базы данных
-	dataSourceName = "tracker.db" // Имя источника данных (файл базы данных)
+	DataSourceName = "tracker.db" // Имя источника данных (файл базы данных)
 )
 
-// Store представляет хранилище посылок, использующее SQLite.
-type Store struct {
+// Repository представляет хранилище посылок, использующее SQLite.
+type Repository struct {
 	*sql.DB // Встраивание стандартного подключения к базе данных
 }
 
-// NewStore инициализирует новое подключение к базе данных и возвращает Store.
-func NewStore() (*Store, error) {
+// NewRepository инициализирует новое подключение к базе данных и возвращает Repository.
+func NewRepository(dataSourceName string) (*Repository, error) {
 	db, err := sql.Open(driverName, dataSourceName)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return &Store{
+	return &Repository{
 		db,
 	}, nil
 }
 
 // Add добавляет новую посылку в базу данных.
 // Возвращает сгенерированный ID новой посылки или ошибку.
-func (s *Store) Add(p *Parcel) (int, error) {
-	r, err := s.Exec(
+func (r *Repository) Add(p *Parcel) (int, error) {
+	res, err := r.Exec(
 		"INSERT INTO parcel (client, status, address, created_at) VALUES (:client, :status, :addr, :created_at)",
 		sql.Named("client", p.Client),
 		sql.Named("status", p.Status),
@@ -44,7 +44,7 @@ func (s *Store) Add(p *Parcel) (int, error) {
 		return 0, err
 	}
 
-	id, err := r.LastInsertId()
+	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -52,11 +52,11 @@ func (s *Store) Add(p *Parcel) (int, error) {
 	return int(id), nil
 }
 
-// GetById возвращает посылку по её идентификатору.
+// Get возвращает посылку по её идентификатору.
 // Возвращает ошибку, если посылка не найдена или произошла другая ошибка при чтении.
-func (s *Store) GetById(id int) (*Parcel, error) {
+func (r *Repository) Get(id int) (*Parcel, error) {
 	p := Parcel{}
-	err := s.QueryRow(
+	err := r.QueryRow(
 		"SELECT number, client, status, address, created_at FROM parcel WHERE number = :number",
 		sql.Named("number", id),
 	).Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
@@ -74,10 +74,10 @@ func (s *Store) GetById(id int) (*Parcel, error) {
 
 // GetByClientId возвращает список всех посылок, принадлежащих указанному клиенту.
 // Возвращает ошибку, если произошли ошибки при чтении.
-func (s *Store) GetByClientId(clId int) ([]Parcel, error) {
-	rows, err := s.Query(
+func (r *Repository) GetByClientId(id int) ([]*Parcel, error) {
+	rows, err := r.Query(
 		"SELECT number, client, status, address, created_at FROM parcel WHERE client = :client",
-		sql.Named("client", clId),
+		sql.Named("client", id),
 	)
 
 	if err != nil {
@@ -91,7 +91,7 @@ func (s *Store) GetByClientId(clId int) ([]Parcel, error) {
 		}
 	}()
 
-	var res []Parcel
+	var res []*Parcel
 	for rows.Next() {
 		p := Parcel{}
 		err = rows.Scan(&p.Number, &p.Client, &p.Status, &p.Address, &p.CreatedAt)
@@ -99,7 +99,7 @@ func (s *Store) GetByClientId(clId int) ([]Parcel, error) {
 			return nil, err
 		}
 
-		res = append(res, p)
+		res = append(res, &p)
 	}
 
 	if err = rows.Err(); err != nil {
@@ -111,13 +111,13 @@ func (s *Store) GetByClientId(clId int) ([]Parcel, error) {
 
 // SetStatus обновляет статус посылки с заданным идентификатором.
 // Возвращает ошибку, если статус недопустим или обновление не удалось.
-func (s *Store) SetStatus(id int, status string) error {
+func (r *Repository) SetStatus(id int, status string) error {
 	st := Status(status)
 	if !st.IsValid() {
 		return fmt.Errorf("invalid status: %s", st)
 	}
 
-	res, err := s.Exec(
+	res, err := r.Exec(
 		"UPDATE parcel SET status = :status WHERE number = :number",
 		sql.Named("status", st),
 		sql.Named("number", id),
@@ -141,72 +141,52 @@ func (s *Store) SetStatus(id int, status string) error {
 
 // SetAddress обновляет адрес доставки посылки.
 // Адрес можно изменить только если посылка находится в статусе "registered".
-func (s *Store) SetAddress(id int, addr string) error {
-	st, err := s.statusById(id)
-
-	if err != nil {
-		return err
-	}
-
-	if st != Registered {
-		return fmt.Errorf("cannot change address — parcel not in registered state (current: %s)", st)
-	}
-
-	_, err = s.Exec(
-		"UPDATE parcel SET address = :address WHERE number = :number",
+func (r *Repository) SetAddress(id int, addr string) error {
+	res, err := r.Exec(
+		"UPDATE parcel SET address = :address WHERE number = :number AND status = :status",
 		sql.Named("address", addr),
 		sql.Named("number", id),
+		sql.Named("status", Registered),
 	)
 
 	if err != nil {
 		return fmt.Errorf("failed to update address: %w", err)
 	}
 
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("could not determine affected rows: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("parcel with id %d not found or not in registered status", id)
+	}
+
 	return nil
 }
 
-// DeleteById удаляет посылку из базы данных, если она находится в статусе "registered".
-// Если посылка находится в другом статусе — она не будет удалена.
-func (s *Store) DeleteById(id int) error {
-	st, err := s.statusById(id)
+// Delete удаляет посылку из базы данных по её идентификатору и статусу.
+//
+// Параметры:
+//   - id: идентификатор посылки (поле `number` в БД).
+//   - status: ожидаемый статус посылки для удаления. Если передан `Empty` — статус не проверяется.
+//
+// Возвращает:
+//   - ошибку, если удаление не удалось (например, из-за несоответствия статуса или ошибки выполнения запроса).
+func (r *Repository) Delete(id int, status Status) error {
+	query := "DELETE FROM parcel WHERE number = :number"
+	args := []any{sql.Named("number", id)}
 
-	if err != nil {
-		return err
+	if status != Empty {
+		query += " AND status = :status"
+		args = append(args, sql.Named("status", status))
 	}
 
-	if st != Registered {
-		// fmt.Printf("cannot delete — parcel not in registered state (current: %s)\n", st)
-		return nil
-	}
-
-	_, err = s.Exec(
-		"DELETE FROM parcel WHERE number = :number",
-		sql.Named("number", id),
-	)
+	_, err := r.Exec(query, args...)
 
 	if err != nil {
 		return fmt.Errorf("failed to delete parcel: %w", err)
 	}
 
 	return nil
-}
-
-// statusById возвращает текущий статус посылки по её ID.
-// Используется для проверки перед обновлением или удалением.
-func (s *Store) statusById(id int) (Status, error) {
-	var st Status
-	err := s.QueryRow(
-		"SELECT status FROM parcel WHERE number = :number",
-		sql.Named("number", id),
-	).Scan(&st)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		return Empty, fmt.Errorf("parcel with id %d not found", id)
-	}
-
-	if err != nil {
-		return Empty, fmt.Errorf("failed to get parcel status: %w", err)
-	}
-
-	return st, nil
 }

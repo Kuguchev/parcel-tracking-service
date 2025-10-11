@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	s, err := parcel.NewStore()
+	r, err := parcel.NewRepository(parcel.DataSourceName)
 
 	if err != nil {
 		fmt.Println(err)
@@ -16,13 +16,13 @@ func main() {
 	}
 
 	defer func() {
-		err := s.Close()
+		err := r.Close()
 		if err != nil {
 			fmt.Println(err)
 		}
 	}()
 
-	ps := parcel.NewService(s)
+	ps := parcel.NewService(r)
 
 	// регистрация посылки
 	clientId := 1
