@@ -166,7 +166,6 @@ func TestGetByClient(t *testing.T) {
 	for _, parcel := range storedParcels {
 		testParcel, exists := parcelMap[parcel.Number]
 		require.True(t, exists)
-		testParcel.Number = parcel.Number
 		assert.Equal(t, *testParcel, *parcel)
 	}
 }
