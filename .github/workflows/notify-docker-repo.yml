@@ -7,12 +7,13 @@ on:
 
 jobs:
   notify:
+    name: Notify Docker Repo
     runs-on: ubuntu-22.04
     steps:
       - name: Trigger app build in docker repository
         uses: peter-evans/repository-dispatch@v4
         with:
-          token: ${{ secrets.PERSONAL_EVENT_DISPATCH_TOKEN }} # scope: public_repo
+          token: ${{ secrets.PERSONAL_EVENT_DISPATCH_TOKEN }} # scope: repo
           repository: Kuguchev/ci-cd-workflow-example
           event-type: app-tag-created
           client-payload: '{"tag": "${{ github.ref_name }}"}'
